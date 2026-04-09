@@ -1,0 +1,19 @@
+{
+  "name": "backend-apigateway",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+      "dev": "node src/app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/http-proxy": "^11.4.3",
+    "dotenv": "^17.4.1",
+    "fastify": "^5.8.4"
+  }
+}
