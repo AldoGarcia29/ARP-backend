@@ -8,7 +8,9 @@ const groupsRoutes = require('./routes/groups.routes');
 
 async function buildServer() {
   await fastify.register(cors, {
-    origin: true,
+  origin: 'http://localhost:4200',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
   });
 
