@@ -3,7 +3,9 @@ const {
   createGroup,
   updateGroup,
   deleteGroup,
-  getGroupMembers
+  getGroupMembers,
+  addGroupMember,
+  removeGroupMember
 } = require('../controllers/group.controller');
 
 async function groupRoutes(fastify) {
@@ -11,7 +13,9 @@ async function groupRoutes(fastify) {
   fastify.post('/groups', createGroup);
   fastify.put('/groups/:id', updateGroup);
   fastify.delete('/groups/:id', deleteGroup);
-    fastify.get('/groups/:groupId/members', getGroupMembers);
+  fastify.get('/groups/:groupId/members', getGroupMembers);
+  fastify.post('/groups/:groupId/members', addGroupMember);
+  fastify.delete('/groups/:groupId/members/:usuarioId', removeGroupMember);
 }
 
 module.exports = groupRoutes;

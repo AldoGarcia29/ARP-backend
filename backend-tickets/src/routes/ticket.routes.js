@@ -7,7 +7,8 @@ module.exports = async function (fastify, opts) {
     deleteTicket,
     changeTicketStatus,
     assignTicket,
-    getTicketHistory    
+    getTicketHistory,
+    getAllTickets    
   } = require('../controllers/ticket.controller');
 
   fastify.post('/tickets', {
@@ -41,4 +42,8 @@ module.exports = async function (fastify, opts) {
   fastify.get('/tickets/:id/history', {
   preHandler: [fastify.authenticate]
 }, getTicketHistory);
+
+fastify.get('/tickets', {
+  preHandler: [fastify.authenticate]
+}, getAllTickets);
 };

@@ -470,7 +470,11 @@ const getUserFullById = async (req, res) => {
 
     const globalPermissionsResult = await pool.query(
       `
-      SELECT p.id, p.codigo, p.descripcion, p.scope
+      SELECT
+        p.id,
+        p.codigo,
+        p.descripcion,
+        p.scope
       FROM usuario_permisos_globales upg
       INNER JOIN permisos p ON p.id = upg.permiso_id
       WHERE upg.usuario_id = $1
@@ -479,18 +483,31 @@ const getUserFullById = async (req, res) => {
       [id]
     );
 
+    // Traer TODOS los grupos donde el usuario pertenece
+    const userGroupsResult = await pool.query(
+      `
+      SELECT
+        g.id AS grupo_id,
+        g.nombre AS grupo_nombre
+      FROM grupo_miembros gm
+      INNER JOIN grupos g ON g.id = gm.grupo_id
+      WHERE gm.usuario_id = $1
+      ORDER BY g.nombre ASC
+      `,
+      [id]
+    );
+
+    // Traer los permisos por grupo que ya tiene asignados
     const groupPermissionsResult = await pool.query(
       `
       SELECT
         upg.grupo_id,
-        g.nombre AS grupo_nombre,
         p.id AS permiso_id,
         p.codigo,
         p.descripcion,
         p.scope
       FROM usuario_permisos_grupo upg
       INNER JOIN permisos p ON p.id = upg.permiso_id
-      INNER JOIN grupos g ON g.id = upg.grupo_id
       WHERE upg.usuario_id = $1
       ORDER BY upg.grupo_id, p.codigo
       `,
@@ -499,11 +516,21 @@ const getUserFullById = async (req, res) => {
 
     const groupMap = {};
 
+    // Primero registrar todos los grupos donde pertenece
+    for (const row of userGroupsResult.rows) {
+      groupMap[row.grupo_id] = {
+        grupo_id: row.grupo_id,
+        grupo_nombre: row.grupo_nombre,
+        permissions: []
+      };
+    }
+
+    // Después meter los permisos que ya tenga asignados en esos grupos
     for (const row of groupPermissionsResult.rows) {
       if (!groupMap[row.grupo_id]) {
         groupMap[row.grupo_id] = {
           grupo_id: row.grupo_id,
-          grupo_nombre: row.grupo_nombre,
+          grupo_nombre: '',
           permissions: []
         };
       }
@@ -538,8 +565,6 @@ const getUserFullById = async (req, res) => {
 };
 
 const updateUserPermissions = async (req, res) => {
-  const client = await pool.connect();
-
   try {
     const { id } = req.params;
     const {
@@ -547,167 +572,62 @@ const updateUserPermissions = async (req, res) => {
       groupPermissions = []
     } = req.body;
 
-    const userResult = await client.query(
-      `
-      SELECT id
-      FROM usuarios
-      WHERE id = $1
-      `,
+    // LIMPIAR IDs inválidos
+    const cleanGlobalIds = (globalPermissionIds || [])
+      .filter(id => id && typeof id === 'string');
+
+    // BORRAR SOLO SI VIENEN DATOS
+    await pool.query(
+      `DELETE FROM usuario_permisos_globales WHERE usuario_id = $1`,
       [id]
     );
 
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        statusCode: 404,
-        intCode: 1011,
-        data: null,
-        message: 'Usuario no encontrado.'
-      });
-    }
-
-    await client.query('BEGIN');
-
-    // =========================
-    // 1. SINCRONIZAR GLOBALES
-    // =========================
-
-    if (Array.isArray(globalPermissionIds) && globalPermissionIds.length > 0) {
-      await client.query(
-        `
-        DELETE FROM usuario_permisos_globales
-        WHERE usuario_id = $1
-          AND permiso_id NOT IN (
-            SELECT UNNEST($2::uuid[])
-          )
-        `,
-        [id, globalPermissionIds]
-      );
-    } else {
-      await client.query(
-        `
-        DELETE FROM usuario_permisos_globales
-        WHERE usuario_id = $1
-        `,
-        [id]
-      );
-    }
-
-    if (Array.isArray(globalPermissionIds) && globalPermissionIds.length > 0) {
-      await client.query(
+    if (cleanGlobalIds.length > 0) {
+      await pool.query(
         `
         INSERT INTO usuario_permisos_globales (usuario_id, permiso_id)
-        SELECT $1, permiso_id
-        FROM UNNEST($2::uuid[]) AS permiso_id
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM usuario_permisos_globales upg
-          WHERE upg.usuario_id = $1
-            AND upg.permiso_id = permiso_id
-        )
+        SELECT $1, UNNEST($2::uuid[])
         `,
-        [id, globalPermissionIds]
+        [id, cleanGlobalIds]
       );
     }
 
-    // =========================
-    // 2. SINCRONIZAR POR GRUPO
-    // =========================
+    // GRUPOS
+    await pool.query(
+      `DELETE FROM usuario_permisos_grupo WHERE usuario_id = $1`,
+      [id]
+    );
 
-    const incomingGroupIds = Array.isArray(groupPermissions)
-      ? groupPermissions
-          .map(item => item.grupo_id)
-          .filter(Boolean)
-      : [];
+    for (const gp of groupPermissions) {
+      const grupoId = gp.grupo_id;
+      const permissionIds = (gp.permissionIds || []).filter(p => p);
 
-    // borrar permisos de grupos que ya no vienen en el payload
-    if (incomingGroupIds.length > 0) {
-      await client.query(
-        `
-        DELETE FROM usuario_permisos_grupo
-        WHERE usuario_id = $1
-          AND grupo_id NOT IN (
-            SELECT UNNEST($2::uuid[])
-          )
-        `,
-        [id, incomingGroupIds]
-      );
-    } else {
-      await client.query(
-        `
-        DELETE FROM usuario_permisos_grupo
-        WHERE usuario_id = $1
-        `,
-        [id]
-      );
-    }
-
-    // sincronizar permisos dentro de cada grupo recibido
-    for (const groupItem of groupPermissions) {
-      const { grupo_id, permissionIds = [] } = groupItem;
-
-      if (!grupo_id) continue;
-
-      if (Array.isArray(permissionIds) && permissionIds.length > 0) {
-        await client.query(
-          `
-          DELETE FROM usuario_permisos_grupo
-          WHERE usuario_id = $1
-            AND grupo_id = $2
-            AND permiso_id NOT IN (
-              SELECT UNNEST($3::uuid[])
-            )
-          `,
-          [id, grupo_id, permissionIds]
-        );
-      } else {
-        await client.query(
-          `
-          DELETE FROM usuario_permisos_grupo
-          WHERE usuario_id = $1
-            AND grupo_id = $2
-          `,
-          [id, grupo_id]
-        );
-      }
-
-      if (Array.isArray(permissionIds) && permissionIds.length > 0) {
-        await client.query(
+      if (permissionIds.length > 0) {
+        await pool.query(
           `
           INSERT INTO usuario_permisos_grupo (usuario_id, grupo_id, permiso_id)
-          SELECT $1, $2, permiso_id
-          FROM UNNEST($3::uuid[]) AS permiso_id
-          WHERE NOT EXISTS (
-            SELECT 1
-            FROM usuario_permisos_grupo upg
-            WHERE upg.usuario_id = $1
-              AND upg.grupo_id = $2
-              AND upg.permiso_id = permiso_id
-          )
+          SELECT $1, $2, UNNEST($3::uuid[])
           `,
-          [id, grupo_id, permissionIds]
+          [id, grupoId, permissionIds]
         );
       }
     }
-
-    await client.query('COMMIT');
 
     return res.status(200).json({
       statusCode: 200,
       intCode: 0,
-      data: null,
+      data: [],
       message: 'Permisos actualizados correctamente.'
     });
+
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Error en updateUserPermissions:', error);
     return res.status(500).json({
       statusCode: 500,
       intCode: 9999,
-      data: null,
+      data: [],
       message: 'Error interno del servidor.'
     });
-  } finally {
-    client.release();
   }
 };
 
@@ -737,6 +657,61 @@ const deleteUser = async (req, res) => {
 
     await client.query('BEGIN');
 
+    // 1. Limpiar referencias en tickets
+    await client.query(
+      `
+      UPDATE tickets
+      SET autor_id = NULL
+      WHERE autor_id = $1
+      `,
+      [id]
+    );
+
+    await client.query(
+      `
+      UPDATE tickets
+      SET asignado_id = NULL
+      WHERE asignado_id = $1
+      `,
+      [id]
+    );
+
+    // 2. Limpiar referencias en historial
+    await client.query(
+      `
+      UPDATE historial_tickets
+      SET usuario_id = NULL
+      WHERE usuario_id = $1
+      `,
+      [id]
+    );
+
+    // 3. Si el usuario creó grupos, aquí tienes dos opciones:
+    //    A) impedir borrarlo si aún es creador de grupos
+    //    B) poner creador_id en NULL si la columna lo permite
+    //
+    // Aquí usaré la opción A, más segura.
+    const ownedGroupsResult = await client.query(
+      `
+      SELECT id, nombre
+      FROM grupos
+      WHERE creador_id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if (ownedGroupsResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        statusCode: 409,
+        intCode: 1013,
+        data: null,
+        message: 'No se puede eliminar el usuario porque aún es creador de uno o más grupos.'
+      });
+    }
+
+    // 4. Borrar relaciones del usuario
     await client.query(
       `
       DELETE FROM usuario_permisos_globales
@@ -761,6 +736,7 @@ const deleteUser = async (req, res) => {
       [id]
     );
 
+    // 5. Finalmente borrar usuario
     await client.query(
       `
       DELETE FROM usuarios
@@ -780,17 +756,17 @@ const deleteUser = async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error en deleteUser:', error);
+
     return res.status(500).json({
       statusCode: 500,
       intCode: 9999,
       data: null,
-      message: 'Error interno del servidor.'
+      message: error.message || 'Error interno del servidor.'
     });
   } finally {
     client.release();
   }
 };
-
 module.exports = {
   registerUser,
   loginUser,

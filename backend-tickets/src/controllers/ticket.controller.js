@@ -583,6 +583,57 @@ const getTicketHistory = async (request, reply) => {
   }
 };
 
+const getAllTickets = async (request, reply) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        t.id,
+        t.grupo_id,
+        t.titulo,
+        t.descripcion,
+        t.autor_id,
+        t.asignado_id,
+        t.estado_id,
+        t.prioridad_id,
+        t.creado_en,
+        t.fecha_limite,
+        t.fecha_final,
+
+        g.nombre AS grupo_nombre,
+        au.username AS autor_username,
+        au.nombre_completo AS autor_nombre_completo,
+        asi.username AS asignado_username,
+        asi.nombre_completo AS asignado_nombre_completo,
+        e.nombre AS estado_nombre,
+        p.nombre AS prioridad_nombre
+
+      FROM tickets t
+      INNER JOIN grupos g ON g.id = t.grupo_id
+      INNER JOIN usuarios au ON au.id = t.autor_id
+      LEFT JOIN usuarios asi ON asi.id = t.asignado_id
+      INNER JOIN estados e ON e.id = t.estado_id
+      INNER JOIN prioridades p ON p.id = t.prioridad_id
+      ORDER BY t.creado_en DESC
+      `
+    );
+
+    return reply.status(200).send({
+      statusCode: 200,
+      intOpCode: 'SxTK200',
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error en getAllTickets:', error);
+    return reply.status(500).send({
+      statusCode: 500,
+      intOpCode: 'SxTK500',
+      data: [],
+      message: 'Error interno al obtener tickets'
+    });
+  }
+};
+
 module.exports = {
   createTicket,
   getTicketsByGroup,
@@ -591,5 +642,6 @@ module.exports = {
   deleteTicket,
   changeTicketStatus,
   assignTicket,
-  getTicketHistory
+  getTicketHistory,
+  getAllTickets
 };

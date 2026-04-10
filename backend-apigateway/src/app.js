@@ -5,12 +5,13 @@ const { PORT } = require('./config/env');
 const authRoutes = require('./routes/auth.routes');
 const ticketsRoutes = require('./routes/tickets.routes');
 const groupsRoutes = require('./routes/groups.routes');
+const permissionsRoutes = require('./routes/permissions.routes');
 
 async function buildServer() {
   await fastify.register(cors, {
-  origin: 'http://localhost:4200',
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: 'http://localhost:4200',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
   });
 
@@ -27,6 +28,7 @@ async function buildServer() {
   await fastify.register(authRoutes);
   await fastify.register(ticketsRoutes);
   await fastify.register(groupsRoutes);
+  await fastify.register(permissionsRoutes);
 
   return fastify;
 }
